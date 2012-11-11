@@ -4,7 +4,7 @@ use strict;
 use warnings;
 
 use vars qw($VERSION);
-$VERSION = '0.03';
+$VERSION = '0.04';
 
 #----------------------------------------------------------------------------
 # Library Modules
@@ -23,7 +23,7 @@ use IO::File;
 
 my %phrasebook = (
     # MySQL database
-    'SelectAll'         => 'SELECT dist,version,pass,fail,na,unknown FROM release_summary WHERE perlmat=1 ORDER BY dist',
+    'SelectAll'         => 'SELECT dist,version,pass,fail,na,unknown,id FROM release_summary WHERE perlmat=1 ORDER BY dist',
     'SelectRows'        => 'SELECT * FROM release_summary ORDER BY dist',
     'DelRows'           => 'DELETE FROM release_summary WHERE dist=?',
     'AddRow'            => 'INSERT INTO release_summary (dist,version,id,guid,oncpan,distmat,perlmat,patched,pass,fail,na,unknown) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)',
@@ -120,6 +120,7 @@ sub backup_from_last {
 
 sub backup_from_start {
     my $self = shift;
+    my $lastid = 0;
 
     $self->_log("Create backup database");
 
@@ -134,9 +135,9 @@ sub backup_from_start {
     # store data from master database
     my %data;
     my $dist = '';
-    my $rows = $self->{CPANSTATS}{dbh}->iterator('array',$phrasebook{'SelectAll'});
+    my $rows = $self->{CPANSTATS}{dbh}->iterator('hash',$phrasebook{'SelectAll'});
     while(my $row = $rows->()) {
-        if($dist && $dist ne $row->[0]) {
+        if($dist && $dist ne $row->{dist}) {
             $self->_log("... dist=$dist");
             for my $vers (keys %data) {
                 $self->{RELEASE}{dbh}->do_query($phrasebook{'InsertRelease'},@{ $data{$vers} });
@@ -145,22 +146,34 @@ sub backup_from_start {
             %data = ();
         }
 
-        $dist = $row->[0];
+        $dist = $row->{dist};
 
-        if($data{$row->[0]} && $data{$row->[0]}{$row->[1]}) {
-            $data{$row->[0]}{$row->[1]}->[2] += $row->[2];
-            $data{$row->[0]}{$row->[1]}->[3] += $row->[3];
-            $data{$row->[0]}{$row->[1]}->[4] += $row->[4];
-            $data{$row->[0]}{$row->[1]}->[5] += $row->[5];
+        if($data{$row->{version}}) {
+            $data{$row->{version}}->[2] += $row->{pass};
+            $data{$row->{version}}->[3] += $row->{fail};
+            $data{$row->{version}}->[4] += $row->{na};
+            $data{$row->{version}}->[5] += $row->{unknown};
         } else {
-            $data{$row->[1]} = $row;
+            $data{$row->{version}} = [ map { $row->{$_} } qw(dist version pass fail na unknown) ];
         }
+
+        $lastid = $row->{id} if($lastid < $row->{id});
     }
 
     if($dist) {
         $self->_log("... dist=$dist");
         for my $vers (keys %data) {
             $self->{RELEASE}{dbh}->do_query($phrasebook{'InsertRelease'},@{ $data{$vers} });
+        }
+    }
+
+    $self->{RELEASE}{exists} = 1;
+
+    my $idfile = $self->idfile();
+    if($idfile) {
+        if(my $fh = IO::File->new($idfile,'w+')) {
+            print $fh "$lastid\n";
+            $fh->close;
         }
     }
 
@@ -272,13 +285,13 @@ sub _init_options {
     $self->help(1)  if($options{help});
     $self->help(0)  if($options{version});
 
-    $self->help(1,"Must specific the configuration file")               unless($options{config});
+    $self->help(1,"Must specific the configuration file")               unless(   $options{config});
     $self->help(1,"Configuration file [$options{config}] not found")    unless(-f $options{config});
 
     # load configuration
     my $cfg = Config::IniFiles->new( -file => $options{config} );
 
-    $self->idfile(  $cfg->val('MASTER','idfile'  ) );
+    $self->idfile(   $cfg->val('MASTER','idfile'   ) );
     $self->logfile(  $cfg->val('MASTER','logfile'  ) );
     $self->logclean( $cfg->val('MASTER','logclean' ) || 0 );
 
@@ -419,7 +432,7 @@ There are no known bugs at the time of this release. However, if you spot a
 bug or are experiencing difficulties, that is not explained within the POD
 documentation, please send bug reports and patches to the RT Queue (see below).
 
-Fixes are dependant upon their severity and my availablity. Should a fix not
+Fixes are dependent upon their severity and my availability. Should a fix not
 be forthcoming, please feel free to (politely) remind me.
 
 RT: http://rt.cpan.org/Public/Dist/Display.html?Name=CPAN-Testers-Data-Release
@@ -436,13 +449,14 @@ F<http://blog.cpantesters.org/>
 
 =head1 AUTHOR
 
-  Barbie <barbie@cpan.org> 2009-present
+  Barbie, <barbie@cpan.org>
+  for Miss Barbell Productions <http://www.missbarbell.co.uk>.
 
 =head1 COPYRIGHT AND LICENSE
 
-  Copyright (C) 2009-2011 Barbie <barbie@cpan.org>
+  Copyright (C) 2009-2012 Barbie for Miss Barbell Productions.
 
   This module is free software; you can redistribute it and/or
-  modify it under the same terms as Perl itself.
+  modify it under the Artistic License 2.0.
 
 =cut
