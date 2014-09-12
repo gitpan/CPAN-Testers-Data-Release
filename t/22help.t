@@ -1,13 +1,13 @@
 #!/usr/bin/perl -w
 use strict;
 
-use Test::More tests => 8;
+use Test::More tests => 10;
 use Test::Trap;
 
 {
     use CPAN::Testers::Data::Release;
 
-    my $VERSION = '0.05';
+    my $VERSION = '0.06';
 
     my $obj;
     my $stdout;
@@ -41,4 +41,11 @@ use Test::Trap;
         like($trap->stdout,qr/$0 v$VERSION/,'.. got version');
     }
 
+    {
+        unshift @ARGV, '--help';
+        trap { $obj = CPAN::Testers::Data::Release->new( config =>  $config ) };
+
+        like($trap->stdout,qr/Usage:.*--config=<file>/,'.. got help');
+        like($trap->stdout,qr/$0 v$VERSION/,'.. got version');
+    }
 }
